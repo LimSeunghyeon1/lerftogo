@@ -21,7 +21,7 @@ from autolab_core import RigidTransform
 from graspnetAPI import GraspGroup, Grasp
 from nerfstudio.pipelines.base_pipeline import Pipeline
 
-from robot_lerf.graspnet_baseline.load_ns_model import NerfstudioWrapper, RealsenseCamera
+from robot_lerf.graspnet_baseline.load_ns_model import NerfstudioWrapper, RealsenseCamera, MyCamera
 from robot_lerf.graspnet_baseline.graspnet_module import GraspNetModule
 from robot_lerf.capture_utils import _generate_hemi
 from robot_lerf.grasp_planner_cmk import UR5GraspPlanner
@@ -132,6 +132,52 @@ def get_grasps(
 
     return gg_all
 
+
+def imitation_learning_from_latent(
+    center_pos_matrix: np.ndarray = np.asarray([[ 1., 0., 0., 0.45], [0., -0.70710678,  0.70710678, -0.28284271],[ 0, -0.70710678, -0.70710678,  0.10284271]], dtype=np.float32),
+    config_path: str = None,
+    pipeline: Pipeline = None,
+    camera_parameter: list = None,
+    
+) -> torch.Tensor:
+    print("config path", config_path)
+    print("pipeline", pipeline)
+    '''
+    need to know how to get c2w
+    
+    center_pos_matrix = np.array([[ 1., 0., 0., 0.45], [0., -0.70710678,  0.70710678, -0.28284271],[ 0, -0.70710678, -0.70710678,  0.10284271]])
+    c2w = ns_wrapper.visercam_to_ns(center_pos_matrix)
+    rscam = RealsenseCamera.get_camera(c2w, downscale=1/4)
+    '''
+    if config_path is not None:
+        ns_wrapper = NerfstudioWrapper(scene_path=config_path)
+    elif pipeline is not None:
+        ns_wrapper = NerfstudioWrapper(pipeline=pipeline)
+    else:
+        raise ValueError("Must provide either scene_path or pipeline")
+    
+    c2w = ns_wrapper.visercam_to_ns(center_pos_matrix)
+    camera = MyCamera(camera_parameter)    
+    camera = camera.get_camera(c2w)
+    
+    
+    '''
+    get relevancy map and hashgrid vector from ns_wrapper
+    '''
+    outputs = ns_wrapper(camera)
+    relevancy_map = outputs['relevancy_0']
+    rgb = outputs['rgb']
+    depth = outputs['depth']
+    print("relevancy_map")
+    
+    conditional_dict = {}
+    conditional_dict['rgb'] = rgb
+    conditional_dict['depth'] = depth
+    conditional_dict['relevancy_map'] = relevancy_map
+    return relevancy_map
+    
+    
+
 def instantiate_scene_from_model(
     server: viser.ViserServer,
     graspnet_ckpt: str,
@@ -164,6 +210,7 @@ def instantiate_scene_from_model(
         ns_wrapper = NerfstudioWrapper(pipeline=pipeline)
     else:
         raise ValueError("Must provide either scene_path or pipeline")
+    
     
     world_pointcloud, global_pointcloud, table_center = ns_wrapper.create_pointcloud()
 
@@ -289,6 +336,7 @@ def main(
     config_path: str = None,  # Nerfstudio model config path, of format outputs/.../config.yml; if None, make sure you capture!
     graspnet_ckpt: str = 'robot_lerf/graspnet_baseline/logs/log_kn/checkpoint.tar',  # GraspNet checkpoint path
     ):
+    config_path = '/home/tidy/lerftogo/outputs/data/lerf-lite/one_model/config.yml'
 
     server = viser.ViserServer()
 
@@ -305,17 +353,26 @@ def main(
     # Create all necessary global variables
     grasps, grasps_dict, lerf_scores, geom_scores, overall_scores, pick_object_pt, place_point, grasp_point, fin_grasp = None, {}, [], [], [], None, None, None, None
     lerf_points_o3d, lerf_relevancy = None, None
+    print("config path")
     if config_path is not None:
-        ns_wrapper, world_pointcloud, global_pointcloud, table_center, grasps, overall_scores = instantiate_scene_from_model(
-            server,
-            graspnet_ckpt,
+        # ns_wrapper, world_pointcloud, global_pointcloud, table_center, grasps, overall_scores = instantiate_scene_from_model(
+        #     server,
+        #     graspnet_ckpt,
+        #     config_path=config_path,
+        #     scene_name=config_path.split('/')[-4],
+        #     floor_height=UR5GraspPlanner.FLOOR_HEIGHT
+        # )
+        print("GOGOGOGOGOGO")
+            
+        imitation_learning_from_latent(\
             config_path=config_path,
-            scene_name=config_path.split('/')[-4],
-            floor_height=UR5GraspPlanner.FLOOR_HEIGHT
+            pipeline=None
         )
     else:
         ns_wrapper, world_pointcloud, global_pointcloud, table_center, grasps, overall_scores = None, None, None, None, None, None
 
+    print("CONFIG DONE====")
+    
     """
     All the functions that require the LERF load/train/save -- includes:
      - Load/save directory, assumes
@@ -396,7 +453,15 @@ def main(
                     pipeline.datamanager.train_dataset, 
                     pipeline.datamanager.config.train_num_rays_per_batch
                     )
+            
+            '''
+            now we're going to take representation from the model
+            where is the evaluation code
+            '''
 
+            
+            
+            '''
             ns_wrapper, world_pointcloud, global_pointcloud, table_center, grasps, overall_scores = instantiate_scene_from_model(
                 server,
                 graspnet_ckpt,
@@ -406,6 +471,8 @@ def main(
                 scene_name=lerf_dataset_path.value
             )
             lerf_train_button.disabled = False
+            print("INSTANTIATE FINISHED")
+            '''
 
     """
     All the functions that affect grasp generation and scores -- includes:

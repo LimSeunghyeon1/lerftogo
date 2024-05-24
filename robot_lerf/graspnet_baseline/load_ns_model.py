@@ -61,6 +61,16 @@ class RealsenseCamera:
 
         return camera
 
+class MyCamera(RealsenseCamera):
+    def __init__(self, camera_parameter: list) -> None:
+        '''
+        camera_parameter: width, height, fx, fy, cx, cy
+        '''
+        super().__init__()
+        if camera_parameter is not None:
+            MyCamera.realsense = o3d.camera.PinholeCameraIntrinsic(*camera_parameter)
+    
+
 class NerfstudioWrapper:
     def __init__(self, scene_path: str = None, pipeline: Pipeline = None):
         if scene_path is not None:
@@ -111,7 +121,8 @@ class NerfstudioWrapper:
         c2w = c2w[:3, :]
         return c2w
 
-    def __call__(self, camera, render_lerf=False) -> Dict[str, np.ndarray]:
+    def __call__(self, camera:Cameras, render_lerf=False) -> Dict[str, np.ndarray]:
+        print("__call__ go")
         if render_lerf:
             self.pipeline.model.step = 1000
         else:
@@ -119,6 +130,7 @@ class NerfstudioWrapper:
         camera_ray_bundle = camera.generate_rays(camera_indices=0).to(device)
         with torch.no_grad():
             outputs = self.pipeline.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
+            
         outputs['xyz'] = camera_ray_bundle.origins + camera_ray_bundle.directions * outputs['depth']
         for k, v in outputs.items():
             outputs[k] = v.squeeze().cpu().numpy()
